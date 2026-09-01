@@ -27,52 +27,53 @@ Decision record for the implementation:
 
 1. Follow upstream PR #2233 for the app-list bug: compile against API 37 and use HiddenApi 4.5.0. Keep `targetSdk` at 36 for this compatibility release; Android's Android 17 local-network documentation explicitly keeps legacy target SDKs on the implicit `INTERNET`-based local-network grant, avoiding an unnecessary new runtime permission flow.
 2. Do not add the broad reflection-based `InstalledPackagesCompat` workaround from thedjchi because HiddenApi 4.5.0 fixes the changed Android 17 `IPackageManager#getInstalledPackages` ABI centrally and is the upstream direction.
-3. Add Android 17 loopback permission support and stop assuming that the ADB pairing endpoint is always `127.0.0.1`: carry the mDNS-resolved host together with the port through pairing/connect call sites.
+3. Add Android 17 loopback permission support and stop assuming that the ADB pairing endpoint is always `127.0.0.1`: carry the mDNS-resolved host through pairing/connect call sites while retaining the existing port callback API.
 4. Import only bounded NSD recovery concepts from Stellar (start-failure retry and controlled discovery restart/cleanup), not its unrelated UI/startup architecture or long/high-frequency refresh loop.
 5. Keep existing Shizuku CI structure, but make fork signing safe when release secrets are absent and publish a final Android 17 compatibility release only from the final merge commit.
+6. The upstream Shizuku-API gitlink update from `a27f6e4` to `68cb8c6` is not required by this patch: the latter is the direct next commit and only changes demo UserManager/example layout code, not the API/stub modules consumed by this manager/server build.
 
 ### 2. Android 17 application-list / hidden-API compatibility
 
-- [ ] Update compile/build SDK and HiddenApi/Shizuku-API dependencies only as required for API 37 compatibility.
-- [ ] Adapt PackageManager/PermissionManager hidden API usage for Android 17 while retaining API guards/backward compatibility.
-- [ ] Verify the application-management data path no longer depends on an obsolete Android 17 method signature.
+- [x] Update compile SDK and HiddenApi dependency as required for API 37 compatibility (`compileSdk 37`, HiddenApi `4.5.0`); keep `targetSdk 36`.
+- [x] Verify PackageManager and PermissionManager compatibility: HiddenApi 4.5.0 supplies the API-37 `IPackageManager` ABI, while its PermissionManager compat path already falls back across persistent-device-id, integer-device-id, and legacy grant/revoke signatures.
+- [x] Verify the application-management data path uses `rikka.hidden.compat.PackageManagerApis`, so it no longer depends on the obsolete Android 17 method signature after the dependency update.
 
 ### 3. Android 17 wireless-debugging permissions and access
 
-- [ ] Add only the Android 17/local-network permissions actually required for loopback, NSD/mDNS, and Wi-Fi service discovery.
-- [ ] Add runtime permission handling where Android 17 requires it; do not rely on manifest declarations alone.
-- [ ] Ensure Android 16 and older do not enter Android 17-only permission flows.
+- [x] Add the API-37 loopback permission needed by the Android 17 networking model (`USE_LOOPBACK_INTERFACE`).
+- [x] Runtime `ACCESS_LOCAL_NETWORK` handling is intentionally not added: this build remains `targetSdk 36`, for which Android 17 keeps legacy local-network access via the existing `INTERNET` permission. Requesting the target-37 permission in this build would create an unnecessary migration/UX change.
+- [x] Preserve Android 16 and older behavior by keeping `targetSdk 36` and all Android 17-specific behavior additive.
 
 ### 4. Wireless ADB / mDNS reliability
 
-- [ ] Harden `_adb-tls-pairing._tcp` and `_adb-tls-connect._tcp` discovery without replacing Shizuku's architecture.
-- [ ] Add bounded recovery for NSD discovery start/stop/failure/timeout states where justified by Stellar/reference behavior.
-- [ ] Validate resolved host/port before attempting ADB connection and avoid stale service results.
-- [ ] Review lifecycle/thread/callback cleanup to prevent retry loops, leaks, duplicate discovery, or unnecessary battery drain.
+- [x] Harden `_adb-tls-pairing._tcp` and `_adb-tls-connect._tcp` discovery without replacing Shizuku's architecture.
+- [x] Add bounded recovery for NSD discovery start/stop/failure/timeout states: at most four restarts, with cleanup and stale-listener identity checks.
+- [x] Validate the resolved endpoint on a local interface and probe the resolved host/port instead of hardcoded `127.0.0.1`; propagate the resolved host to pairing, manual-start discovery, notification pairing, and boot auto-start paths.
+- [x] Review lifecycle/thread/callback behavior and add a `resolving` guard to prevent concurrent `resolveService` calls; callbacks from stale discovery generations are ignored.
 
 ### 5. Build and CI verification
 
-- [ ] Preserve or minimally update the existing GitHub Actions build workflow.
-- [ ] Make the manager APK available as an Actions artifact if the existing workflow does not already do so.
-- [ ] Run/observe CI for the implementation branch and fix every compile/build failure.
+- [x] Preserve the existing GitHub Actions build workflow structure and make fork signing safe when official release secrets are absent.
+- [x] Preserve manager APK upload as an Actions artifact and add an idempotent final release step gated by a `[release]` commit on `master`.
+- [ ] Run/observe CI for the implementation branch and fix every compile/build failure. (Currently blocked because this fresh fork reports zero check runs; GitHub Actions likely needs its one-time fork workflow enablement.)
 - [ ] Confirm an installable manager APK is actually produced; source-level plausibility is not sufficient.
 
 ### 6. Full code review before finalization
 
-- [ ] Review the complete diff from `master` to the implementation branch, file by file.
-- [ ] Check API-level guards and Android 16-or-older regression risk.
-- [ ] Check permission declarations and runtime permission UX/flow.
-- [ ] Check NSD/mDNS lifecycle, callback ordering, thread safety, retry bounds, cleanup, and failure paths.
-- [ ] Check that no unrelated Stellar/thedjchi functionality or broad refactor was imported.
+- [x] Review the complete diff from `master` to the implementation branch once; one concurrent-NSD-resolution race was found and fixed.
+- [x] Check API-level guards and Android 16-or-older regression risk.
+- [x] Check permission declarations and runtime permission scope/UX.
+- [x] Check NSD/mDNS lifecycle, callback ordering, thread visibility, retry bounds, cleanup, and failure paths; add stale-listener and resolving guards.
+- [x] Check that no unrelated Stellar/thedjchi functionality or broad reflection workaround was imported.
 - [ ] Run targeted secret scanning on the final diff/content and resolve any finding.
-- [ ] Fix all review findings and re-run build verification after fixes.
+- [ ] Re-run the complete review and build verification after the remaining CI/final cleanup steps.
 
 ### 7. Final cleanup, merge, and release
 
 - [ ] Update this checklist so completed work is reflected.
-- [ ] Remove `plan.md` from the implementation branch before the final PR/merge.
+- [ ] Remove `plan.md` from the implementation branch before finalization.
+- [ ] Create a clean final branch directly from `master` and commit only the reviewed production/CI files, so neither the final PR nor its commit history contains `plan.md` or planning commits.
 - [ ] Ensure the final code tree contains no temporary planning/debug files.
-- [ ] Create a focused PR from `android17-compat` to `master` with root cause, implementation, compatibility, and build/review notes.
-- [ ] Prefer squash merge so the final `master` history does not retain the temporary planning commit.
-- [ ] Ensure the final GitHub build/release path publishes a clearly labeled Android 17 compatibility APK.
-- [ ] Verify the resulting commit/PR/build/release state and report the final APK location.
+- [ ] Create a focused final PR with root cause, implementation, compatibility, and build/review notes; close the temporary validation PR without merging it.
+- [ ] Squash merge the clean final PR with `[release]` in the final commit title so `master` contains one focused implementation commit and triggers release publication.
+- [ ] Verify the resulting commit/PR/build/release state and confirm the final APK asset.
