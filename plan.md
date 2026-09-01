@@ -55,7 +55,7 @@ Decision record for the implementation:
 
 - [x] Preserve the existing GitHub Actions build workflow structure and make fork signing safe when official release secrets are absent.
 - [x] Preserve manager APK upload as an Actions artifact and add an idempotent final release step gated by a `[release]` commit on `master`.
-- [ ] Run/observe CI for the implementation branch and fix every compile/build failure. (Currently blocked because this fresh fork reports zero check runs; GitHub Actions likely needs its one-time fork workflow enablement.)
+- [ ] Run/observe CI for the implementation branch and fix every compile/build failure. GitHub Actions was enabled on the fork; trigger a fresh push and verify the resulting checks.
 - [ ] Confirm an installable manager APK is actually produced; source-level plausibility is not sufficient.
 
 ### 6. Full code review before finalization
@@ -65,7 +65,7 @@ Decision record for the implementation:
 - [x] Check permission declarations and runtime permission scope/UX.
 - [x] Check NSD/mDNS lifecycle, callback ordering, thread visibility, retry bounds, cleanup, and failure paths; add stale-listener and resolving guards.
 - [x] Check that no unrelated Stellar/thedjchi functionality or broad reflection workaround was imported.
-- [ ] Run targeted secret scanning on the final diff/content and resolve any finding.
+- [ ] Run targeted secret scanning on the final diff/content and resolve any finding. GitHub Advanced Security scanning API is unavailable on this fork, so also perform a manual diff/content check for embedded credentials.
 - [ ] Re-run the complete review and build verification after the remaining CI/final cleanup steps.
 
 ### 7. Final cleanup, merge, and release
