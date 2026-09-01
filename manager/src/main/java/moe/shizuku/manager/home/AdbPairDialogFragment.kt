@@ -175,7 +175,7 @@ private class ViewModel(context: Context) : androidx.lifecycle.ViewModel() {
 
     fun run(port: Int, password: String) {
         GlobalScope.launch(Dispatchers.IO) {
-            val host = "127.0.0.1"
+            val host = adbMdns.resolvedHost ?: "127.0.0.1"
 
             val key = try {
                 AdbKey(PreferenceAdbKeyStore(ShizukuSettings.getPreferences()), "shizuku")
