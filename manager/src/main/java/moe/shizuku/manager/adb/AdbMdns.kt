@@ -36,8 +36,17 @@ class AdbMdns(
 
     @Volatile
     private var listener: DiscoveryListener? = null
+
+    @Volatile
+    private var resolving = false
+
+    @Volatile
     private var pendingRestart = false
+
+    @Volatile
     private var restartScheduled = false
+
+    @Volatile
     private var restartAttempts = 0
 
     private val nsdManager: NsdManager = context.getSystemService(NsdManager::class.java)
@@ -61,6 +70,7 @@ class AdbMdns(
         running = true
         serviceName = null
         resolvedHost = null
+        resolving = false
         restartAttempts = 0
         startDiscovery()
     }
@@ -70,6 +80,7 @@ class AdbMdns(
         running = false
         serviceName = null
         resolvedHost = null
+        resolving = false
         pendingRestart = false
         restartScheduled = false
         handler.removeCallbacks(restartRunnable)
@@ -90,6 +101,7 @@ class AdbMdns(
     private fun startDiscovery() {
         if (!running || listener != null) return
 
+        resolving = false
         val newListener = DiscoveryListener(this)
         listener = newListener
         try {
@@ -156,11 +168,13 @@ class AdbMdns(
     }
 
     private fun onServiceFound(source: DiscoveryListener, info: NsdServiceInfo) {
-        if (!running || listener !== source) return
+        if (!running || listener !== source || resolving) return
 
+        resolving = true
         try {
             nsdManager.resolveService(info, ResolveListener(this, source))
         } catch (e: RuntimeException) {
+            resolving = false
             Log.w(TAG, "resolveService failed for ${info.serviceName}", e)
         }
     }
@@ -174,9 +188,14 @@ class AdbMdns(
         if (running) scheduleDiscoveryTimeout()
     }
 
+    private fun onResolveFailed(source: DiscoveryListener) {
+        if (listener === source) resolving = false
+    }
+
     private fun onServiceResolved(source: DiscoveryListener, resolvedService: NsdServiceInfo) {
         if (listener !== source) return
 
+        resolving = false
         val host = resolvedService.host ?: return
         if (!running || !isLocalAddress(host) || !isPortInUse(host, resolvedService.port)) return
 
@@ -291,6 +310,7 @@ class AdbMdns(
     ) : NsdManager.ResolveListener {
         override fun onResolveFailed(nsdServiceInfo: NsdServiceInfo, errorCode: Int) {
             Log.v(TAG, "onResolveFailed: ${nsdServiceInfo.serviceName}, $errorCode")
+            adbMdns.onResolveFailed(discoveryListener)
         }
 
         override fun onServiceResolved(nsdServiceInfo: NsdServiceInfo) {
