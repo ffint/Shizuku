@@ -1,29 +1,34 @@
 package rikka.shizuku.server.util;
 
+import android.content.pm.IPackageManager;
 import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.util.Log;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
 
+import rikka.hidden.compat.util.SystemServiceBinder;
+
 /**
  * Compatibility bridge for IPackageManager#getInstalledPackages on Android 17.
  *
- * Android 17 keeps the same arguments but changes the Binder return type from
- * ParceledListSlice to PackageInfoList. Calling the pre-17 hidden stub therefore
- * throws before Shizuku can enumerate authorized applications. Reflection keeps
- * this isolated from the compile-time hidden API ABI while preserving old Android
- * behavior.
+ * Android 17 keeps the arguments but changes the Binder return type from
+ * ParceledListSlice to PackageInfoList. Invoke the runtime platform proxy by
+ * reflection so the compile-time Android 16 hidden stub does not constrain the
+ * return descriptor. SystemServiceBinder preserves Shizuku's binder wrapper in
+ * the manager process and uses the privileged service directly in the server.
  */
 public final class InstalledPackagesCompat {
 
     private static final String TAG = "InstalledPackagesCompat";
     private static final int ANDROID_13 = 33;
     private static final String PARCELED_LIST_SLICE = "android.content.pm.ParceledListSlice";
+
+    private static final SystemServiceBinder<IPackageManager> PACKAGE_MANAGER =
+            new SystemServiceBinder<>("package", IPackageManager.Stub::asInterface);
 
     private InstalledPackagesCompat() {
     }
@@ -40,21 +45,11 @@ public final class InstalledPackagesCompat {
     @SuppressWarnings("unchecked")
     public static List<PackageInfo> getInstalledPackages(long flags, int userId)
             throws ReflectiveOperationException {
-        try {
-            Object contextPackageManager = getContextPackageManager();
-            Method method = contextPackageManager.getClass()
-                    .getMethod("getInstalledPackagesAsUser", int.class, int.class);
-            Object result = invoke(method, contextPackageManager, (int) flags, userId);
-            if (result instanceof List) {
-                return (List<PackageInfo>) result;
-            }
-        } catch (NoSuchMethodException ignored) {
-            // Fall through to the privileged Binder path.
-        } catch (Exception e) {
-            Log.d(TAG, "getInstalledPackagesAsUser failed; using Binder fallback", e);
+        Object packageManager = PACKAGE_MANAGER.get();
+        if (packageManager == null) {
+            return Collections.emptyList();
         }
 
-        Object packageManager = getPackageManager();
         Method method;
         Object result;
         if (Build.VERSION.SDK_INT >= ANDROID_13) {
@@ -80,29 +75,6 @@ public final class InstalledPackagesCompat {
 
         throw new IllegalStateException(
                 "Unsupported getInstalledPackages return type: " + resultClassName);
-    }
-
-    private static Object getPackageManager() throws ReflectiveOperationException {
-        Class<?> servicesClass = Class.forName("rikka.hidden.compat.Services");
-        Field field = servicesClass.getDeclaredField("packageManager");
-        field.setAccessible(true);
-        Object service = field.get(null);
-        return service.getClass().getMethod("get").invoke(service);
-    }
-
-    private static Object getContextPackageManager() throws ReflectiveOperationException {
-        Class<?> activityThreadClass = Class.forName("android.app.ActivityThread");
-        Object activityThread = activityThreadClass.getMethod("currentActivityThread").invoke(null);
-        if (activityThread != null) {
-            Object application = activityThreadClass.getMethod("getApplication").invoke(activityThread);
-            if (application != null) {
-                return application.getClass().getMethod("getPackageManager").invoke(application);
-            }
-        }
-
-        activityThread = activityThreadClass.getMethod("systemMain").invoke(null);
-        Object systemContext = activityThreadClass.getMethod("getSystemContext").invoke(activityThread);
-        return systemContext.getClass().getMethod("getPackageManager").invoke(systemContext);
     }
 
     private static Object invoke(Method method, Object receiver, Object... args)

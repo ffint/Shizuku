@@ -18,6 +18,19 @@ jobs:
         with:
           submodules: 'recursive'
           fetch-depth: 0
+      - name: Apply staged Android 16/17 user-manager compatibility
+        if: github.ref == 'refs/heads/android17-compat'
+        run: |
+          if [ -f .github/user-manager-compat.patch ]; then
+            git apply --check .github/user-manager-compat.patch
+            git apply .github/user-manager-compat.patch
+            git rm .github/user-manager-compat.patch
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -A
+            git commit -m 'fix: use Android 16/17 user manager compatibility'
+            git push origin HEAD:android17-compat
+          fi
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
