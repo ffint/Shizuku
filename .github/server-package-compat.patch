@@ -2,7 +2,8 @@ diff --git a/server/src/main/java/rikka/shizuku/server/ShizukuConfigManager.java
 index 170c7d5..54996ca 100644
 --- a/server/src/main/java/rikka/shizuku/server/ShizukuConfigManager.java
 +++ b/server/src/main/java/rikka/shizuku/server/ShizukuConfigManager.java
-@@ -28,6 +28,7 @@ import rikka.hidden.compat.PackageManagerApis;
+@@ -27,8 +27,9 @@ import kotlin.collections.ArraysKt;
+ import rikka.hidden.compat.PackageManagerApis;
  import rikka.hidden.compat.PermissionManagerApis;
  import rikka.hidden.compat.UserManagerApis;
  import rikka.shizuku.server.ktx.HandlerKt;
@@ -10,7 +11,9 @@ index 170c7d5..54996ca 100644
  
  public class ShizukuConfigManager extends ConfigManager {
  
-@@ -149,7 +150,7 @@ public class ShizukuConfigManager extends ConfigManager {
+     private static final Gson GSON_IN = new GsonBuilder()
+@@ -148,9 +149,9 @@ public class ShizukuConfigManager extends ConfigManager {
+             }
          }
  
          for (int userId : UserManagerApis.getUserIdsNoThrow()) {
@@ -19,11 +22,13 @@ index 170c7d5..54996ca 100644
                  if (pi == null
                          || pi.applicationInfo == null
                          || pi.requestedPermissions == null
+                         || !ArraysKt.contains(pi.requestedPermissions, PERMISSION)) {
 diff --git a/server/src/main/java/rikka/shizuku/server/ShizukuService.java b/server/src/main/java/rikka/shizuku/server/ShizukuService.java
 index ed90d22..397656d 100644
 --- a/server/src/main/java/rikka/shizuku/server/ShizukuService.java
 +++ b/server/src/main/java/rikka/shizuku/server/ShizukuService.java
-@@ -54,6 +54,7 @@ import rikka.rish.RishConfig;
+@@ -53,8 +53,9 @@ import rikka.parcelablelist.ParcelableListSlice;
+ import rikka.rish.RishConfig;
  import rikka.shizuku.ShizukuApiConstants;
  import rikka.shizuku.server.api.IContentProviderUtils;
  import rikka.shizuku.server.util.HandlerUtil;
@@ -31,7 +36,9 @@ index ed90d22..397656d 100644
  import rikka.shizuku.server.util.UserHandleCompat;
  
  public class ShizukuService extends Service<ShizukuUserServiceManager, ShizukuClientManager, ShizukuConfigManager> {
-@@ -428,7 +429,7 @@ public class ShizukuService extends Service<ShizukuUserServiceManager, ShizukuCl
+ 
+@@ -427,9 +428,9 @@ public class ShizukuService extends Service<ShizukuUserServiceManager, ShizukuCl
+             users.add(userId);
          }
  
          for (int user : users) {
@@ -40,7 +47,9 @@ index ed90d22..397656d 100644
                  if (Objects.equals(MANAGER_APPLICATION_ID, pi.packageName)) continue;
                  if (pi.applicationInfo == null) continue;
  
-@@ -477,7 +478,7 @@ public class ShizukuService extends Service<ShizukuUserServiceManager, ShizukuCl
+                 int uid = pi.applicationInfo.uid;
+@@ -476,9 +477,9 @@ public class ShizukuService extends Service<ShizukuUserServiceManager, ShizukuCl
+     }
  
      private static void sendBinderToClient(Binder binder, int userId) {
          try {
@@ -49,3 +58,4 @@ index ed90d22..397656d 100644
                  if (pi == null || pi.requestedPermissions == null)
                      continue;
  
+                 if (ArraysKt.contains(pi.requestedPermissions, PERMISSION)) {
