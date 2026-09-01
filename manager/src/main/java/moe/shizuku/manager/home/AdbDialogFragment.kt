@@ -84,12 +84,11 @@ class AdbDialogFragment : DialogFragment() {
 
         port.observe(this) {
             if (it > 65535 || it < 1) return@observe
-            startAndDismiss(it)
+            startAndDismiss(it, adbMdns.resolvedHost ?: "127.0.0.1")
         }
     }
 
-    private fun startAndDismiss(port: Int) {
-        val host = "127.0.0.1"
+    private fun startAndDismiss(port: Int, host: String = "127.0.0.1") {
         val intent = Intent(context, StarterActivity::class.java).apply {
             putExtra(StarterActivity.EXTRA_IS_ROOT, false)
             putExtra(StarterActivity.EXTRA_HOST, host)
