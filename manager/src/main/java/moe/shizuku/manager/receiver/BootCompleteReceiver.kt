@@ -66,12 +66,13 @@ class BootCompleteReceiver : BroadcastReceiver() {
         val pending = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             val latch = CountDownLatch(1)
-            val adbMdns = AdbMdns(context, AdbMdns.TLS_CONNECT) { port ->
+            lateinit var adbMdns: AdbMdns
+            adbMdns = AdbMdns(context, AdbMdns.TLS_CONNECT) { port ->
                 if (port <= 0) return@AdbMdns
                 try {
                     val keystore = PreferenceAdbKeyStore(ShizukuSettings.getPreferences())
                     val key = AdbKey(keystore, "shizuku")
-                    val client = AdbClient("127.0.0.1", port, key)
+                    val client = AdbClient(adbMdns.resolvedHost ?: "127.0.0.1", port, key)
                     client.connect()
                     client.shellCommand(Starter.internalCommand, null)
                     client.close()
@@ -81,7 +82,7 @@ class BootCompleteReceiver : BroadcastReceiver() {
             }
             if (Settings.Global.getInt(cr, "adb_wifi_enabled", 0) == 1) {
                 adbMdns.start()
-                latch.await(3, TimeUnit.SECONDS)
+                latch.await(6, TimeUnit.SECONDS)
                 adbMdns.stop()
             }
             pending.finish()

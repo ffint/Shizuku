@@ -2,14 +2,13 @@ package moe.shizuku.manager.utils
 
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
-import android.content.pm.ParceledListSlice
 import android.os.RemoteException
-import rikka.hidden.compat.PackageManagerApis
 import rikka.hidden.compat.PermissionManagerApis
-import rikka.hidden.compat.UserManagerApis
 import rikka.hidden.compat.util.SystemServiceBinder
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuBinderWrapper
+import rikka.shizuku.server.util.InstalledPackagesCompat
+import rikka.shizuku.server.util.UserManagerCompat
 
 object ShizukuSystemApis {
 
@@ -25,7 +24,7 @@ object ShizukuSystemApis {
         return if (!Shizuku.pingBinder()) {
             arrayListOf(UserInfoCompat(UserHandleCompat.myUserId(), "Owner"))
         } else try {
-            val list = UserManagerApis.getUsers(true, true, true)
+            val list = UserManagerCompat.getUsers(true, true, true)
             val users: MutableList<UserInfoCompat> = ArrayList<UserInfoCompat>()
             for (ui in list) {
                 users.add(UserInfoCompat(ui.id, ui.name))
@@ -57,15 +56,10 @@ object ShizukuSystemApis {
         return if (!Shizuku.pingBinder()) {
             ArrayList()
         } else try {
-            val listSlice: ParceledListSlice<PackageInfo>? =
-                PackageManagerApis.getInstalledPackages(
-                    flags,
-                    userId
-                )
-            return if (listSlice != null) {
-                listSlice.list
-            } else ArrayList()
+            InstalledPackagesCompat.getInstalledPackages(flags, userId)
         } catch (tr: RemoteException) {
+            throw RuntimeException(tr.message, tr)
+        } catch (tr: ReflectiveOperationException) {
             throw RuntimeException(tr.message, tr)
         }
     }

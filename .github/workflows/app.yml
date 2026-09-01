@@ -5,6 +5,9 @@ on:
     paths-ignore:
       - '.github/ISSUE_TEMPLATE'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,14 +23,23 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-      - name: Write key
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+      - name: Write release key when configured
+        if: github.ref == 'refs/heads/master'
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_ALIAS_PASSWORD: ${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
         run: |
-          echo KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} > signing.properties
-          echo KEYSTORE_ALIAS=${{ secrets.KEYSTORE_ALIAS }} >> signing.properties
-          echo KEYSTORE_ALIAS_PASSWORD='${{ secrets.KEYSTORE_ALIAS_PASSWORD }}' >> signing.properties
-          echo KEYSTORE_FILE=../key.jks >> signing.properties
-          echo ${{ secrets.KEYSTORE }} | base64 --decode > key.jks
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEYSTORE_ALIAS" ] && [ -n "$KEYSTORE_ALIAS_PASSWORD" ]; then
+            printf 'KEYSTORE_PASSWORD=%s\n' "$KEYSTORE_PASSWORD" > signing.properties
+            printf 'KEYSTORE_ALIAS=%s\n' "$KEYSTORE_ALIAS" >> signing.properties
+            printf 'KEYSTORE_ALIAS_PASSWORD=%s\n' "$KEYSTORE_ALIAS_PASSWORD" >> signing.properties
+            printf 'KEYSTORE_FILE=../key.jks\n' >> signing.properties
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > key.jks
+          else
+            echo 'Release signing secrets are not configured; using the Android debug keystore fallback.'
+          fi
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -39,16 +51,36 @@ jobs:
         id: buildWithGradle
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --channel=3 "platforms;android-37.0" "build-tools;36.0.0"
           echo 'android.sdk.channel=3' >> gradle.properties
           echo 'android.native.buildOutput=verbose' >> gradle.properties
           echo 'org.gradle.caching=true' >> gradle.properties
           echo 'org.gradle.parallel=true' >> gradle.properties
           ./gradlew :manager:assemble
           releaseName=`ls manager/build/outputs/apk/release/shizuku*-v*-release.apk | awk -F '(/|-release.apk)' '{print $6}'` && echo "releaseName=$releaseName" >> $GITHUB_OUTPUT
-      - name: Upload release
+      - name: Upload release artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.buildWithGradle.outputs.releaseName }}
           path: "manager/build/outputs"
           compression-level: 9
+      - name: Publish Android 17 compatibility release
+        if: success() && github.ref == 'refs/heads/master' && contains(github.event.head_commit.message, '[release]')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v13.7.0-android17
+        run: |
+          apk=$(find manager/build/outputs/apk/release -type f -name 'shizuku*-release.apk' | head -n 1)
+          test -n "$apk"
+
+          notes='Unofficial Shizuku Android 17 compatibility build. Fixes API 37 package-list compatibility and Android 17 wireless ADB discovery/pairing. If repository release-signing secrets are not configured, this APK is signed with the CI Android debug key and cannot update an APK signed with the official Shizuku key.'
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$apk" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$apk" \
+              --target "$GITHUB_SHA" \
+              --title 'Shizuku 13.7.0 Android 17 Compatibility' \
+              --notes "$notes"
+          fi
