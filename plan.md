@@ -17,11 +17,19 @@ Update this Shizuku fork so that it works correctly on Android 17 (API 37), with
 
 ### 1. Baseline and reference analysis
 
-- [ ] Record the current fork baseline, build configuration, submodules, manager manifest, application-management path, and ADB/mDNS implementation.
-- [ ] Compare the relevant Android 17 changes from current `RikkaApps/Shizuku`, including the upstream app-list fix/PR and current HiddenApi/Shizuku-API dependency expectations.
-- [ ] Compare `thedjchi/Shizuku` `v13.7.0-thedjchi`, isolating Android 17/API 37 and local-network changes from unrelated fork changes.
-- [ ] Compare `roro2239/Stellar`, isolating only the wireless ADB/mDNS reliability changes that are applicable to Shizuku.
-- [ ] Write down the minimal set of files/changes required before editing production code.
+- [x] Record the current fork baseline, build configuration, submodules, manager manifest, application-management path, and ADB/mDNS implementation.
+- [x] Compare the relevant Android 17 changes from current `RikkaApps/Shizuku`, including upstream PR #2233 and the HiddenApi 4.5.0 fix.
+- [x] Compare `thedjchi/Shizuku` `v13.7.0-thedjchi`, isolating Android 17/API 37 and local-network changes from unrelated fork changes.
+- [x] Compare `roro2239/Stellar`, isolating only the wireless ADB/mDNS reliability changes that are applicable to Shizuku.
+- [x] Write down the minimal set of files/changes required before editing production code.
+
+Decision record for the implementation:
+
+1. Follow upstream PR #2233 for the app-list bug: compile against API 37 and use HiddenApi 4.5.0. Keep `targetSdk` at 36 for this compatibility release; Android's Android 17 local-network documentation explicitly keeps legacy target SDKs on the implicit `INTERNET`-based local-network grant, avoiding an unnecessary new runtime permission flow.
+2. Do not add the broad reflection-based `InstalledPackagesCompat` workaround from thedjchi because HiddenApi 4.5.0 fixes the changed Android 17 `IPackageManager#getInstalledPackages` ABI centrally and is the upstream direction.
+3. Add Android 17 loopback permission support and stop assuming that the ADB pairing endpoint is always `127.0.0.1`: carry the mDNS-resolved host together with the port through pairing/connect call sites.
+4. Import only bounded NSD recovery concepts from Stellar (start-failure retry and controlled discovery restart/cleanup), not its unrelated UI/startup architecture or long/high-frequency refresh loop.
+5. Keep existing Shizuku CI structure, but make fork signing safe when release secrets are absent and publish a final Android 17 compatibility release only from the final merge commit.
 
 ### 2. Android 17 application-list / hidden-API compatibility
 
