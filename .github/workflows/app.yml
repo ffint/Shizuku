@@ -23,23 +23,6 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '21'
-      - name: Write release key when configured
-        if: github.ref == 'refs/heads/master'
-        env:
-          KEYSTORE_B64: ${{ secrets.KEYSTORE }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
-          KEYSTORE_ALIAS_PASSWORD: ${{ secrets.KEYSTORE_ALIAS_PASSWORD }}
-        run: |
-          if [ -n "$KEYSTORE_B64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEYSTORE_ALIAS" ] && [ -n "$KEYSTORE_ALIAS_PASSWORD" ]; then
-            printf 'KEYSTORE_PASSWORD=%s\n' "$KEYSTORE_PASSWORD" > signing.properties
-            printf 'KEYSTORE_ALIAS=%s\n' "$KEYSTORE_ALIAS" >> signing.properties
-            printf 'KEYSTORE_ALIAS_PASSWORD=%s\n' "$KEYSTORE_ALIAS_PASSWORD" >> signing.properties
-            printf 'KEYSTORE_FILE=../key.jks\n' >> signing.properties
-            printf '%s' "$KEYSTORE_B64" | base64 --decode > key.jks
-          else
-            echo 'Release signing secrets are not configured; using the Android debug keystore fallback.'
-          fi
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -50,6 +33,7 @@ jobs:
       - name: Build with Gradle
         id: buildWithGradle
         run: |
+          set -euo pipefail
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --channel=3 "platforms;android-37.0" "build-tools;36.0.0"
           echo 'android.sdk.channel=3' >> gradle.properties
@@ -57,30 +41,88 @@ jobs:
           echo 'org.gradle.caching=true' >> gradle.properties
           echo 'org.gradle.parallel=true' >> gradle.properties
           ./gradlew :manager:assemble
-          releaseName=`ls manager/build/outputs/apk/release/shizuku*-v*-release.apk | awk -F '(/|-release.apk)' '{print $6}'` && echo "releaseName=$releaseName" >> $GITHUB_OUTPUT
-      - name: Upload release artifact
+
+          release_apk=$(find manager/build/outputs/apk/release -type f -name 'shizuku*-release.apk' | head -n 1)
+          test -n "$release_apk"
+          release_name=$(basename "$release_apk" -release.apk)
+          echo "releaseApk=$release_apk" >> "$GITHUB_OUTPUT"
+          echo "releaseName=$release_name" >> "$GITHUB_OUTPUT"
+
+      - name: Sign fixed-key release
+        id: signRelease
+        if: success() && github.ref == 'refs/heads/master' && contains(github.event.head_commit.message, '[release]')
+        env:
+          APK_SIGNING_KEY: ${{ secrets.APK_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${APK_SIGNING_KEY:-}" ]; then
+            echo '::error::APK_SIGNING_KEY is not configured. Refusing to publish an unsigned/debug-signed release.'
+            exit 1
+          fi
+
+          key_file="$RUNNER_TEMP/shizuku-release.pk8"
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s' "$APK_SIGNING_KEY" | base64 --decode > "$key_file"
+          openssl pkey -inform DER -in "$key_file" -check -noout
+
+          private_pub=$(openssl pkey -inform DER -in "$key_file" -pubout -outform DER | sha256sum | awk '{print $1}')
+          cert_pub=$(openssl x509 -in signing/release-cert.pem -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')
+          if [ "$private_pub" != "$cert_pub" ]; then
+            echo '::error::APK_SIGNING_KEY does not match signing/release-cert.pem.'
+            exit 1
+          fi
+
+          apk='${{ steps.buildWithGradle.outputs.releaseApk }}'
+          test -f "$apk"
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
+          # apksigner strips any pre-existing debug signature before applying this signer.
+          "$apksigner" sign \
+            --key "$key_file" \
+            --cert signing/release-cert.pem \
+            "$apk"
+
+          "$apksigner" verify --verbose --print-certs "$apk"
+
+          expected_fingerprint=$(openssl x509 -in signing/release-cert.pem -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          actual_fingerprint=$("$apksigner" verify --print-certs "$apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]')
+          if [ "$actual_fingerprint" != "$expected_fingerprint" ]; then
+            echo '::error::Signed APK certificate fingerprint does not match the committed release certificate.'
+            exit 1
+          fi
+
+          sha256sum "$apk" | tee "$apk.sha256"
+          echo "signedApk=$apk" >> "$GITHUB_OUTPUT"
+          echo "signedSha256=$apk.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.buildWithGradle.outputs.releaseName }}
           path: "manager/build/outputs"
           compression-level: 9
-      - name: Publish Android 17 compatibility release
-        if: success() && github.ref == 'refs/heads/master' && contains(github.event.head_commit.message, '[release]')
+
+      - name: Publish Android 17 fixed-signing release
+        if: steps.signRelease.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v13.7.0-android17
+          RELEASE_TAG: v13.7.1-android17
         run: |
-          apk=$(find manager/build/outputs/apk/release -type f -name 'shizuku*-release.apk' | head -n 1)
-          test -n "$apk"
+          set -euo pipefail
+          apk='${{ steps.signRelease.outputs.signedApk }}'
+          sha_file='${{ steps.signRelease.outputs.signedSha256 }}'
+          test -f "$apk"
+          test -f "$sha_file"
 
-          notes='Unofficial Shizuku Android 17 compatibility build. Fixes API 37 package-list compatibility and Android 17 wireless ADB discovery/pairing. If repository release-signing secrets are not configured, this APK is signed with the CI Android debug key and cannot update an APK signed with the official Shizuku key.'
+          notes='Unofficial Shizuku Android 17 compatibility build signed with the ffint fixed release key. The workflow verifies that the private key in APK_SIGNING_KEY matches the committed public certificate before signing, then verifies the APK signature and publishes its SHA-256 checksum.'
 
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$apk" --clobber
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$apk" "$sha_file" --clobber
           else
-            gh release create "$RELEASE_TAG" "$apk" \
+            gh release create "$RELEASE_TAG" "$apk" "$sha_file" \
               --target "$GITHUB_SHA" \
-              --title 'Shizuku 13.7.0 Android 17 Compatibility' \
+              --title 'Shizuku 13.7.1 Android 17 Compatibility' \
               --notes "$notes"
           fi
